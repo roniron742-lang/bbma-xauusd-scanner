@@ -4,13 +4,21 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="BBMA Oma Ally - XAUUSD", layout="wide")
-st.title("📊 BBMA Oma Ally Scanner & Chart (XAUUSD)")
+st.set_page_config(page_title="BBMA Oma Ally - XAUUSD Live", layout="wide")
+st.title("📊 BBMA Oma Ally Live Scanner & Chart (XAUUSD)")
 
 # --- SIDEBAR PENGATURAN ---
 st.sidebar.header("Pengaturan Chart & Sinyal")
 timeframe = st.sidebar.selectbox("Pilih Timeframe", ["5m", "15m", "1h", "4h", "1d"], index=2)
-period = st.sidebar.selectbox("Periode Data", ["5d", "1mo", "3mo", "6mo"], index=1)
+
+# Periode Data: Daily, Weekly, Monthly
+period_options = {
+    "1 Daily (Harian)": "1mo",
+    "1 Weekly (Mingguan)": "1y",
+    "1 Monthly (Bulanan)": "5y"
+}
+selected_period_label = st.sidebar.selectbox("Periode Data", list(period_options.keys()), index=0)
+period = period_options[selected_period_label]
 
 st.sidebar.subheader("Tampilkan Sinyal di Chart")
 plot_ret = st.sidebar.checkbox("Plot Signal REENTRY (RET)", value=True)
@@ -24,8 +32,8 @@ def calc_wma(series, length):
     weights = np.arange(1, length + 1)
     return series.rolling(length).apply(lambda x: np.dot(x, weights) / weights.sum(), raw=True)
 
-# --- AMBIL DATA XAUUSD ---
-@st.cache_data(ttl=60)
+# --- AMBIL DATA HISTORIS ---
+@st.cache_data(ttl=30)
 def load_data(tf, per):
     df = yf.download("GC=F", interval=tf, period=per, progress=False)
     if isinstance(df.columns, pd.MultiIndex):
@@ -77,16 +85,26 @@ df['mmt_buy'] = (df['Close'] > df['topBB']) & (df['Open'] < df['topBB'])
 df['ali_sell'] = (df['Open'] < df['lowBB']) & (df['Close'] < df['lowBB'])
 df['ali_buy'] = (df['Open'] > df['topBB']) & (df['Close'] > df['topBB'])
 
-# --- PANEL STATUS SINYAL TERAKHIR ---
-last = df.iloc[-1]
-st.subheader(f"Harga Terakhir XAUUSD: ${last['Close']:.2f}")
+# --- BAGIAN LIVE PRICE & STATUS (AUTO-REFRESH OTOMATIS) ---
+@st.fragment(run_every=5)
+def render_live_section():
+    try:
+        ticker = yf.Ticker("GC=F")
+        live_price = ticker.fast_info.get('last_price', df['Close'].iloc[-1])
+    except:
+        live_price = df['Close'].iloc[-1]
 
-col1, col2, col3, col4, col5 = st.columns(5)
-col1.metric("REENTRY", "SELL 🔴" if last['reject_mahi'] else ("BUY 🟢" if last['reject_malo'] else "Netral"))
-col2.metric("EXTREME", "SELL 🔴" if last['ext_sell'] else ("BUY 🟢" if last['ext_buy'] else "Netral"))
-col3.metric("CSAK", "SELL 🔴" if last['csak_sell'] else ("BUY 🟢" if last['csak_buy'] else "Netral"))
-col4.metric("CSM", "SELL 🔴" if last['mmt_sell'] else ("BUY 🟢" if last['mmt_buy'] else "Netral"))
-col5.metric("ALIEN", "SELL 🔴" if last['ali_sell'] else ("BUY 🟢" if last['ali_buy'] else "Netral"))
+    st.subheader(f"🔴 Harga Live XAUUSD: ${live_price:.2f}  *(Auto-refresh tiap 5 detik)*")
+
+    last = df.iloc[-1]
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("REENTRY", "SELL 🔴" if last['reject_mahi'] else ("BUY 🟢" if last['reject_malo'] else "Netral"))
+    col2.metric("EXTREME", "SELL 🔴" if last['ext_sell'] else ("BUY 🟢" if last['ext_buy'] else "Netral"))
+    col3.metric("CSAK", "SELL 🔴" if last['csak_sell'] else ("BUY 🟢" if last['csak_buy'] else "Netral"))
+    col4.metric("CSM", "SELL 🔴" if last['mmt_sell'] else ("BUY 🟢" if last['mmt_buy'] else "Netral"))
+    col5.metric("ALIEN", "SELL 🔴" if last['ali_sell'] else ("BUY 🟢" if last['ali_buy'] else "Netral"))
+
+render_live_section()
 
 # --- VISUALISASI CHART INTERAKTIF (PLOTLY) ---
 df_plot = df.tail(120)
