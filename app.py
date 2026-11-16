@@ -25,14 +25,14 @@ plot_ext = st.sidebar.checkbox("Plot Signal EXTREME (EXT)", value=True)
 plot_csa = st.sidebar.checkbox("Plot Signal CSAK (CSA)", value=True)
 plot_mmt = st.sidebar.checkbox("Plot Signal CSM (MMT)", value=True)
 
-# --- FUNGSI WMA & ANALISIS BBMA ---
+# --- FUNGSI WMA & ANALISIS BBMA (DENGAN KETERANGAN BUY / SELL) ---
 def calc_wma(series, length):
     weights = np.arange(1, length + 1)
     return series.rolling(length).apply(lambda x: np.dot(x, weights) / weights.sum(), raw=True)
 
 def analyze_bbma(df):
     if df.empty or len(df) < 30:
-        return "Netral"
+        return "Netral ⚪"
     
     df = df.copy()
     df['midBB'] = df['Close'].rolling(20).mean()
@@ -53,29 +53,38 @@ def analyze_bbma(df):
     last = df.iloc[-1]
     prev = df.iloc[-2]
 
-    # Logika Sinyal
-    is_reentry = (last['High'] > last['mahi5'] and last['Close'] < last['mahi5'] and last['Close'] < last['mahi10'] and last['Close'] < last['midBB']) or \
-                 (last['Low'] < last['malo5'] and last['Close'] > last['malo5'] and last['Close'] > last['malo10'] and last['Close'] > last['midBB'])
+    # Deteksi Kondisi Sinyal Buy/Sell
+    reject_mahi = (last['High'] > last['mahi5']) and (last['Close'] < last['mahi5']) and (last['Close'] < last['mahi10']) and (last['Close'] < last['midBB'])
+    reject_malo = (last['Low'] < last['malo5']) and (last['Close'] > last['malo5']) and (last['Close'] > last['malo10']) and (last['Close'] > last['midBB'])
     
-    is_csak = (last['Open'] > last['midBB'] and last['Close'] < last['midBB']) or \
-              (last['Open'] < last['midBB'] and last['Close'] > last['midBB'])
+    csak_sell = (last['Open'] > last['midBB']) and (last['Close'] < last['midBB'])
+    csak_buy = (last['Open'] < last['midBB']) and (last['Close'] > last['midBB'])
     
     candle_sz_p = abs(prev['Close'] - prev['Open'])
     candle_sz = abs(last['Close'] - last['Open'])
-    is_extreme = ((prev['Close'] > prev['Open']) and (last['Close'] < last['topBB']) and (last['Close'] < last['Open']) and ((last['mahi5_p'] > last['topBB_p']) or (last['mahi5'] > last['topBB'])) and (candle_sz > candle_sz_p / 2)) or \
-                 ((prev['Close'] < prev['Open']) and (last['Close'] > last['lowBB']) and (last['Close'] > last['Open']) and ((last['malo5_p'] < last['lowBB_p']) or (last['malo5'] < last['lowBB'])) and (candle_sz > candle_sz_p / 2))
+    ext_sell = ((prev['Close'] > prev['Open']) and (last['Close'] < last['topBB']) and (last['Close'] < last['Open']) and ((last['mahi5_p'] > last['topBB_p']) or (last['mahi5'] > last['topBB'])) and (candle_sz > candle_sz_p / 2))
+    ext_buy = ((prev['Close'] < prev['Open']) and (last['Close'] > last['lowBB']) and (last['Close'] > last['Open']) and ((last['malo5_p'] < last['lowBB_p']) or (last['malo5'] < last['lowBB'])) and (candle_sz > candle_sz_p / 2))
     
-    is_csm = (last['Close'] < last['lowBB'] and last['Open'] > last['lowBB']) or \
-             (last['Close'] > last['topBB'] and last['Open'] < last['topBB'])
+    mmt_sell = (last['Close'] < last['lowBB']) and (last['Open'] > last['lowBB'])
+    mmt_buy = (last['Close'] > last['topBB']) and (last['Open'] < last['topBB'])
 
-    if is_csm:
-        return "Momentum (CSM) ⚡"
-    elif is_extreme:
-        return "Extreme 🔥"
-    elif is_reentry:
-        return "Reentry 🎯"
-    elif is_csak:
-        return "CSAK 💎"
+    # Prioritas Status
+    if mmt_sell:
+        return "Momentum (CSM) Sell 🔴"
+    elif mmt_buy:
+        return "Momentum (CSM) Buy 🟢"
+    elif ext_sell:
+        return "Extreme Sell 🔴"
+    elif ext_buy:
+        return "Extreme Buy 🟢"
+    elif reject_mahi:
+        return "Reentry Sell 🔴"
+    elif reject_malo:
+        return "Reentry Buy 🟢"
+    elif jika_csak_sell := csak_sell:
+        return "CSAK Sell 🔴"
+    elif jika_csak_buy := csak_buy:
+        return "CSAK Buy 🟢"
     else:
         return "Netral ⚪"
 
@@ -101,7 +110,6 @@ mtf_data = []
 
 for tf_item in mtf_list:
     try:
-        # Ambil data pendek untuk scanner mtf
         per_val = "5d" if tf_item in ["15m", "30m", "1h"] else ("1mo" if tf_item == "4h" else "3mo")
         df_temp = yf.download("GC=F", interval=tf_item, period=per_val, progress=False)
         if isinstance(df_temp.columns, pd.MultiIndex):
@@ -133,7 +141,6 @@ def render_live_section():
 
     st.subheader(f"🔴 Harga Live XAUUSD: ${live_price:.2f}  *(Auto-refresh tiap 5 detik)*")
 
-    # Kalkulasi indikator untuk chart utama
     dft = df.copy()
     dft['midBB'] = dft['Close'].rolling(20).mean()
     dft['midBB_p'] = dft['midBB'].shift(1)
@@ -149,8 +156,8 @@ def render_live_section():
     dft['mahi5_p'] = dft['mahi5'].shift(1)
     dft['malo5_p'] = dft['malo5'].shift(1)
 
-    dft['reject_mahi'] = (dft['High'] > dft['mahi5']) & (dft['Close'] < dft['mahi5']) & (dft['Close'] < dft['mahi10']) & (dft['Close'] < dft['midBB']) & (dft['mahi5'] < dft['midBB'])
-    dft['reject_malo'] = (dft['Low'] < dft['malo5']) & (dft['Close'] > dft['malo5']) & (dft['Close'] > dft['malo10']) & (dft['Close'] > dft['midBB']) & (dft['malo5'] > dft['midBB'])
+    dft['reject_mahi'] = (dft['High'] > dft['mahi5']) & (dft['Close'] < dft['mahi5']) & (dft['Close'] < dft['mahi10']) & (dft['Close'] < dft['midBB'])
+    dft['reject_malo'] = (dft['Low'] < dft['malo5']) & (dft['Close'] > dft['malo5']) & (dft['Close'] > dft['malo10']) & (dft['Close'] > dft['midBB'])
     dft['csak_sell'] = (dft['Open'] > dft['midBB']) & (dft['Close'] < dft['midBB'])
     dft['csak_buy'] = (dft['Open'] < dft['midBB']) & (dft['Close'] > dft['midBB'])
     
@@ -188,8 +195,8 @@ df_plot['mahi5_p'] = df_plot['mahi5'].shift(1)
 df_plot['malo5_p'] = df_plot['malo5'].shift(1)
 df_plot['ema50'] = df_plot['Close'].ewm(span=50, adjust=False).mean()
 
-df_plot['reject_mahi'] = (df_plot['High'] > df_plot['mahi5']) & (df_plot['Close'] < df_plot['mahi5']) & (df_plot['Close'] < df_plot['mahi10']) & (df_plot['Close'] < df_plot['midBB']) & (df_plot['mahi5'] < df_plot['midBB'])
-df_plot['reject_malo'] = (df_plot['Low'] < df_plot['malo5']) & (df_plot['Close'] > df_plot['malo5']) & (df_plot['Close'] > df_plot['malo10']) & (df_plot['Close'] > df_plot['midBB']) & (df_plot['malo5'] > df_plot['midBB'])
+df_plot['reject_mahi'] = (df_plot['High'] > df_plot['mahi5']) & (df_plot['Close'] < df_plot['mahi5']) & (df_plot['Close'] < df_plot['mahi10']) & (df_plot['Close'] < df_plot['midBB'])
+df_plot['reject_malo'] = (df_plot['Low'] < df_plot['malo5']) & (df_plot['Close'] > df_plot['malo5']) & (df_plot['Close'] > df_plot['malo10']) & (df_plot['Close'] > df_plot['midBB'])
 df_plot['csak_sell'] = (df_plot['Open'] > df_plot['midBB']) & (df_plot['Close'] < df_plot['midBB'])
 df_plot['csak_buy'] = (df_plot['Open'] < df_plot['midBB']) & (df_plot['Close'] > df_plot['midBB'])
 
